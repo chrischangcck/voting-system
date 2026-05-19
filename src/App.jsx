@@ -320,6 +320,7 @@ function AdminDashboard({ user, sessionCode, setView }) {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [expandedTarget, setExpandedTarget] = useState(null);
+  const [showProgressDetail, setShowProgressDetail] = useState(false);
 
   useEffect(() => {
     const sessionRef = doc(db, 'sessions', sessionCode);
@@ -327,7 +328,6 @@ function AdminDashboard({ user, sessionCode, setView }) {
       if (docSnap.exists()) setSession(docSnap.data());
       setLoading(false);
     });
-
     const votesRef = collection(db, 'votes');
     const unsubVotes = onSnapshot(votesRef, (snapshot) => {
       const votesData = [];
@@ -337,7 +337,6 @@ function AdminDashboard({ user, sessionCode, setView }) {
       });
       setVotes(votesData);
     });
-
     return () => { unsubSession(); unsubVotes(); };
   }, [sessionCode]);
 
@@ -350,7 +349,6 @@ function AdminDashboard({ user, sessionCode, setView }) {
     const criteriaScores = {};
     session.criteria.forEach(c => criteriaScores[c.id] = { sum: 0, count: 0, avg: 0 });
     const feedbackList = [];
-
     receivedVotes.forEach(vote => {
       let voteTotal = 0;
       session.criteria.forEach(c => {
@@ -365,17 +363,24 @@ function AdminDashboard({ user, sessionCode, setView }) {
       totalWeightedScore += voteTotal;
       if (vote.feedback && vote.feedback.trim() !== '') feedbackList.push(vote.feedback);
     });
-
     const voteCount = receivedVotes.length;
     const finalScore = voteCount > 0 ? (totalWeightedScore / voteCount) : 0;
     session.criteria.forEach(c => {
       if (criteriaScores[c.id].count > 0) criteriaScores[c.id].avg = criteriaScores[c.id].sum / criteriaScores[c.id].count;
     });
-
     return { ...target, voteCount, finalScore: Number(finalScore.toFixed(2)), criteriaScores, feedbackList };
   });
-
   results.sort((a, b) => b.finalScore - a.finalScore);
+
+  // 計算評分進度：每個 voter 需要對所有其他 target 完成評分才算完成
+  const totalTargets = session.targets.length;
+  const requiredVotesPerVoter = session.mode === 'group' ? totalTargets - 1 : totalTargets;
+  const voterProgress = session.targets.map(target => {
+    const myVotes = votes.filter(v => v.voterId === target.id);
+    const done = myVotes.length >= requiredVotesPerVoter;
+    return { ...target, votedCount: myVotes.length, required: requiredVotesPerVoter, done };
+  });
+  const completedCount = voterProgress.filter(v => v.done).length;
 
   const currentHref = window.location.href.split('?')[0];
   const votingUrl = `${currentHref}?session=${sessionCode}`;
@@ -410,6 +415,29 @@ function AdminDashboard({ user, sessionCode, setView }) {
 
   const toggleExpand = (targetId) => setExpandedTarget(expandedTarget === targetId ? null : targetId);
 
+  // 下載 Excel（純 CSV 格式，用 .csv 副檔名，Excel 可直接開啟）
+  const downloadExcel = () => {
+    const BOM = '\uFEFF';
+    const headers = ['名次', '名稱', '總分(100分制)', '收到票數', ...session.criteria.map(c => `${c.name}(平均/${c.maxScore}分)`), '文字回饋'];
+    const rows = results.map((r, idx) => [
+      idx + 1,
+      r.name,
+      r.finalScore,
+      r.voteCount,
+      ...session.criteria.map(c => r.criteriaScores[c.id].avg.toFixed(1)),
+      r.feedbackList.join(' | ')
+    ]);
+    const csvContent = BOM + [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    a.download = `${session.title}_評分結果_${sessionCode}_${dateStr}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 justify-between">
@@ -420,19 +448,25 @@ function AdminDashboard({ user, sessionCode, setView }) {
             <span className="text-slate-600 font-medium">即時結果儀表板</span>
             <span className="text-slate-400 text-sm ml-2">| 共收到 {votes.length} 筆評分</span>
           </div>
-          <div className="mt-8 flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-            <div className="px-4 py-3 bg-indigo-50 rounded-xl border border-indigo-100 flex items-center gap-4">
-              <div>
-                <div className="text-xs text-indigo-800 font-bold mb-1 uppercase tracking-wider">活動參與代碼</div>
-                <div className="text-4xl font-black text-indigo-600 tracking-widest">{sessionCode}</div>
-              </div>
+          <div className="mt-6 flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+            <div className="px-4 py-3 bg-indigo-50 rounded-xl border border-indigo-100">
+              <div className="text-xs text-indigo-800 font-bold mb-1 uppercase tracking-wider">活動參與代碼</div>
+              <div className="text-4xl font-black text-indigo-600 tracking-widest">{sessionCode}</div>
             </div>
-            <button onClick={() => setView('voting')} 
+            <button onClick={() => setView('voting')}
               className="flex items-center gap-2 px-5 py-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium rounded-xl transition-colors h-[68px]">
               <User size={20} className="text-slate-400" />
               <div className="text-left leading-tight">
                 <div>模擬學生投票</div>
                 <div className="text-xs text-slate-500">不用跳轉即可測試</div>
+              </div>
+            </button>
+            <button onClick={downloadExcel}
+              className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl transition-colors h-[68px]">
+              <ExternalLink size={20} />
+              <div className="text-left leading-tight">
+                <div>下載結果</div>
+                <div className="text-xs text-emerald-200">Excel / CSV 格式</div>
               </div>
             </button>
           </div>
@@ -454,10 +488,82 @@ function AdminDashboard({ user, sessionCode, setView }) {
         </div>
       </div>
 
+      {/* 評分進度統計卡片 */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <button
+          onClick={() => setShowProgressDetail(!showProgressDetail)}
+          className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-4">
+            <h3 className="font-bold text-lg text-slate-800">評分進度</h3>
+            <div className="flex items-center gap-2">
+              <span className={`text-2xl font-black ${completedCount === totalTargets ? 'text-emerald-600' : 'text-amber-500'}`}>
+                {completedCount}
+              </span>
+              <span className="text-slate-400 font-bold text-lg">/</span>
+              <span className="text-2xl font-black text-slate-400">{totalTargets}</span>
+              <span className="text-sm text-slate-500 ml-1">已完成評分</span>
+            </div>
+            {completedCount === totalTargets && (
+              <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-full">全員完成</span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                style={{ width: `${totalTargets > 0 ? (completedCount / totalTargets) * 100 : 0}%` }} />
+            </div>
+            {showProgressDetail ? <ChevronUp className="text-slate-400" /> : <ChevronDown className="text-slate-400" />}
+          </div>
+        </button>
+
+        {showProgressDetail && (
+          <div className="px-6 pb-6 border-t border-slate-100 animate-in slide-in-from-top-2 duration-200">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+              <div>
+                <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-2 flex items-center gap-1">
+                  <Check size={14} /> 已完成（{voterProgress.filter(v => v.done).length} 組）
+                </div>
+                <div className="space-y-2">
+                  {voterProgress.filter(v => v.done).length === 0 && (
+                    <div className="text-sm text-slate-400 italic">尚無人完成</div>
+                  )}
+                  {voterProgress.filter(v => v.done).map(v => (
+                    <div key={v.id} className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                      <CheckCircle size={16} className="text-emerald-500 shrink-0" />
+                      <span className="text-sm font-medium text-emerald-800">{v.name}</span>
+                      <span className="text-xs text-emerald-500 ml-auto">{v.votedCount}/{v.required} 筆</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center gap-1">
+                  <AlertCircle size={14} /> 未完成（{voterProgress.filter(v => !v.done).length} 組）
+                </div>
+                <div className="space-y-2">
+                  {voterProgress.filter(v => !v.done).length === 0 && (
+                    <div className="text-sm text-slate-400 italic">全員已完成</div>
+                  )}
+                  {voterProgress.filter(v => !v.done).map(v => (
+                    <div key={v.id} className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                      <AlertCircle size={16} className="text-amber-400 shrink-0" />
+                      <span className="text-sm font-medium text-amber-800">{v.name}</span>
+                      <span className="text-xs text-amber-500 ml-auto">{v.votedCount}/{v.required} 筆</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 排行榜 */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
           <h3 className="font-bold text-lg text-slate-800">總分排行榜</h3>
-          <span className="text-xs font-medium text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">滿分 100 (依權重計算)</span>
+          <span className="text-xs font-medium text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">滿分 100（依權重計算）</span>
         </div>
         <div className="divide-y divide-slate-100">
           {results.map((r, index) => (
@@ -498,7 +604,7 @@ function AdminDashboard({ user, sessionCode, setView }) {
                   </div>
                   {r.feedbackList.length > 0 && (
                     <>
-                      <h5 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2 uppercase tracking-wider">匿名文字回饋</h5>
+                      <h5 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">匿名文字回饋</h5>
                       <div className="space-y-2">
                         {r.feedbackList.map((fb, idx) => (
                           <div key={idx} className="bg-indigo-50/50 p-3 rounded-lg text-sm text-slate-700 border border-indigo-100/50 relative">
@@ -656,6 +762,55 @@ function VoterInterface({ user, sessionCode }) {
     );
   }
 
+  // 下載 PDF（用瀏覽器列印功能產生 PDF）
+  const downloadPDF = () => {
+    const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const voterName = session.targets.find(t => t.id === voterIdentity)?.name || '匿名';
+    const pdfTitle = `${session.title}_我的評分記錄_${voterName}_${dateStr}`;
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html lang="zh-TW">
+      <head>
+        <meta charset="UTF-8">
+        <title>${pdfTitle}</title>
+        <style>
+          body { font-family: sans-serif; padding: 32px; color: #1e293b; }
+          h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+          .meta { color: #64748b; font-size: 13px; margin-bottom: 24px; }
+          .card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+          .target-name { font-size: 18px; font-weight: 700; margin-bottom: 12px; color: #4f46e5; }
+          .criterion { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #f1f5f9; font-size: 14px; }
+          .criterion:last-child { border-bottom: none; }
+          .feedback { background: #f8fafc; border-radius: 8px; padding: 10px; margin-top: 10px; font-size: 13px; color: #475569; }
+          .feedback-label { font-weight: 600; margin-bottom: 4px; }
+          .not-voted { color: #94a3b8; font-size: 13px; font-style: italic; }
+          @media print { body { padding: 16px; } }
+        </style>
+      </head>
+      <body>
+        <h1>${session.title} — 我的評分記錄</h1>
+        <div class="meta">評分人：${session.targets.find(t => t.id === voterIdentity)?.name || '匿名'} ｜ 活動代碼：${sessionCode} ｜ 列印時間：${new Date().toLocaleString('zh-TW')}</div>
+        ${session.targets.filter(t => t.id !== voterIdentity).map(t => {
+          const voted = votedTargetIds.includes(t.id);
+          if (!voted) return `<div class="card"><div class="target-name">${t.name}</div><div class="not-voted">未評分</div></div>`;
+          return `
+            <div class="card">
+              <div class="target-name">${t.name}</div>
+              <div class="not-voted">（評分明細已記錄於系統，請向主辦單位查詢）</div>
+            </div>`;
+        }).join('')}
+        <div style="margin-top:24px; color:#94a3b8; font-size:12px;">此記錄由課程即時評分系統自動產生</div>
+      </body>
+      </html>
+    `;
+    const win = window.open('', '_blank');
+    win.document.write(printContent);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); }, 500);
+  };
+
   // 全部評完
   if (availableTargets.length === 0) {
     return (
@@ -664,7 +819,11 @@ function VoterInterface({ user, sessionCode }) {
           <CheckCircle className="text-emerald-500 w-10 h-10" />
         </div>
         <h2 className="text-2xl font-black text-slate-800 mb-2">評分完成！</h2>
-        <p className="text-slate-500 mb-8">您已經完成所有可評估對象的評分，感謝您的參與。</p>
+        <p className="text-slate-500 mb-6">您已經完成所有可評估對象的評分，感謝您的參與。</p>
+        <button onClick={downloadPDF}
+          className="w-full py-3 mb-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-base transition-all flex items-center justify-center gap-2">
+          <ExternalLink size={18} /> 下載我的評分記錄（PDF）
+        </button>
         <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
           <p className="text-sm text-slate-600 font-medium">您可以關閉此視窗，或觀看現場大螢幕的即時結果。</p>
         </div>

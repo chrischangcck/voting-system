@@ -526,7 +526,8 @@ function VoterInterface({ user, sessionCode }) {
   const [error, setError] = useState('');
   const [voterIdentity, setVoterIdentity] = useState('');
   const [hasStarted, setHasStarted] = useState(false);
-  const [currentTargetIndex, setCurrentTargetIndex] = useState(0);
+  // 使用者自行選擇要評的對象 id，null 表示尚未選擇
+  const [selectedTargetId, setSelectedTargetId] = useState(null);
   const [scores, setScores] = useState({});
   const [feedback, setFeedback] = useState('');
   const [votedTargetIds, setVotedTargetIds] = useState([]);
@@ -554,23 +555,35 @@ function VoterInterface({ user, sessionCode }) {
     fetchSession();
   }, [sessionCode]);
 
-  const targetsToVote = session ? session.targets.filter(t => t.id !== voterIdentity && !votedTargetIds.includes(t.id)) : [];
+  // 可評分的對象：排除自己（小組模式）、已評過的
+  const availableTargets = session
+    ? session.targets.filter(t => t.id !== voterIdentity && !votedTargetIds.includes(t.id))
+    : [];
 
   const handleStart = (e) => {
     e.preventDefault();
     if (!voterIdentity && session.mode === 'group') { alert("請選擇您的組別"); return; }
-    if (session.mode === 'individual' && !voterIdentity) setVoterIdentity('indv_' + Math.random().toString(36).substring(2, 9));
+    if (session.mode === 'individual' && !voterIdentity) {
+      setVoterIdentity('indv_' + Math.random().toString(36).substring(2, 9));
+    }
     setHasStarted(true);
   };
 
   const handleScoreChange = (criterionId, val) => setScores(prev => ({ ...prev, [criterionId]: Number(val) }));
 
+  const handleSelectTarget = (targetId) => {
+    setSelectedTargetId(targetId);
+    setScores({});
+    setFeedback('');
+  };
+
   const submitVote = async () => {
+    if (!selectedTargetId) { alert("請先選擇要評分的對象"); return; }
     const missingScores = session.criteria.some(c => scores[c.id] === undefined);
     if (missingScores) { alert("請完成所有指標的評分"); return; }
 
     setIsSubmitting(true);
-    const target = targetsToVote[currentTargetIndex];
+    const target = session.targets.find(t => t.id === selectedTargetId);
     try {
       const voteId = `${sessionCode}_${voterIdentity || 'anon'}_${target.id}_${Date.now()}`;
       const voteRef = doc(db, 'votes', voteId);
@@ -585,6 +598,8 @@ function VoterInterface({ user, sessionCode }) {
       const newVotedList = [...votedTargetIds, target.id];
       setVotedTargetIds(newVotedList);
       localStorage.setItem(`voted_${sessionCode}`, JSON.stringify(newVotedList));
+      // 評完後清空，讓使用者重新選下一組
+      setSelectedTargetId(null);
       setScores({});
       setFeedback('');
     } catch (err) {
@@ -604,6 +619,7 @@ function VoterInterface({ user, sessionCode }) {
     </div>
   );
 
+  // 第一步：確認身分
   if (!hasStarted) {
     return (
       <div className="max-w-md mx-auto mt-8 bg-white p-8 rounded-2xl shadow-sm border border-slate-200 animate-in zoom-in-95 duration-300">
@@ -640,7 +656,8 @@ function VoterInterface({ user, sessionCode }) {
     );
   }
 
-  if (targetsToVote.length === 0) {
+  // 全部評完
+  if (availableTargets.length === 0) {
     return (
       <div className="max-w-md mx-auto mt-12 bg-white p-10 rounded-3xl shadow-sm border border-emerald-100 text-center animate-in zoom-in duration-500">
         <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -655,75 +672,105 @@ function VoterInterface({ user, sessionCode }) {
     );
   }
 
-  const target = targetsToVote[currentTargetIndex];
-  const progress = ((session.targets.length - targetsToVote.length) / (session.mode === 'group' ? session.targets.length - 1 : session.targets.length)) * 100;
-  const isComplete = session.criteria.every(c => scores[c.id] !== undefined);
+  const totalVotable = session.mode === 'group' ? session.targets.length - 1 : session.targets.length;
+  const votedCount = totalVotable - availableTargets.length;
+  const progress = totalVotable > 0 ? (votedCount / totalVotable) * 100 : 0;
+  const selectedTarget = selectedTargetId ? session.targets.find(t => t.id === selectedTargetId) : null;
+  const isComplete = selectedTarget && session.criteria.every(c => scores[c.id] !== undefined);
 
   return (
-    <div className="max-w-2xl mx-auto animate-in fade-in duration-300">
-      <div className="mb-8">
+    <div className="max-w-2xl mx-auto animate-in fade-in duration-300 space-y-6">
+
+      {/* 進度條 */}
+      <div>
         <div className="flex justify-between text-sm font-bold text-slate-500 mb-2">
           <span>評分進度</span>
-          <span className="text-indigo-600">{Math.round(progress)}%</span>
+          <span className="text-indigo-600">{votedCount} / {totalVotable} 完成</span>
         </div>
         <div className="h-3 w-full bg-slate-200 rounded-full overflow-hidden">
           <div className="h-full bg-indigo-600 rounded-full transition-all duration-500 ease-out" style={{ width: `${progress}%` }}></div>
         </div>
       </div>
-      <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="bg-indigo-600 p-6 text-center text-white">
-          <p className="text-indigo-200 font-medium text-sm mb-1 uppercase tracking-widest">目前評分對象</p>
-          <h2 className="text-3xl font-black">{target.name}</h2>
-        </div>
-        <div className="p-6 sm:p-8 space-y-8">
-          <div className="space-y-6">
-            {session.criteria.map((c, idx) => (
-              <div key={c.id} className="bg-slate-50 p-5 rounded-2xl border border-slate-100 relative">
-                <div className="absolute -left-3 -top-3 w-8 h-8 bg-indigo-100 text-indigo-700 font-bold rounded-full flex items-center justify-center border-4 border-white shadow-sm">{idx + 1}</div>
-                <div className="flex justify-between items-end mb-4 ml-2">
-                  <label className="block text-lg font-bold text-slate-800">{c.name}</label>
-                  <span className="text-sm font-medium text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">滿分 {c.maxScore}</span>
-                </div>
-                {c.maxScore <= 10 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {Array.from({ length: c.maxScore }, (_, i) => i + 1).map(val => (
-                      <button key={val} onClick={() => handleScoreChange(c.id, val)}
-                        className={`flex-1 min-w-[40px] py-3 rounded-xl font-bold text-lg transition-all ${scores[c.id] === val ? 'bg-indigo-600 text-white shadow-md transform scale-105' : 'bg-white border-2 border-slate-200 text-slate-600 hover:border-indigo-300 hover:bg-indigo-50'}`}>
-                        {val}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-4">
-                    <input type="range" min="0" max={c.maxScore} value={scores[c.id] || 0}
-                      onChange={(e) => handleScoreChange(c.id, e.target.value)}
-                      className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
-                    <input type="number" min="0" max={c.maxScore} value={scores[c.id] || ''}
-                      onChange={(e) => handleScoreChange(c.id, e.target.value)}
-                      placeholder="輸入"
-                      className="w-24 p-3 text-center font-bold text-lg border-2 border-slate-200 rounded-xl focus:border-indigo-500 outline-none" />
-                  </div>
-                )}
+
+      {/* 選擇評分對象 */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+        <h3 className="text-base font-bold text-slate-700 mb-4">
+          {session.mode === 'group' ? '請選擇要評分的組別' : '請選擇要評分的人員'}
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {availableTargets.map(t => (
+            <button key={t.id} onClick={() => handleSelectTarget(t.id)}
+              className={`p-3 rounded-xl border-2 text-sm font-bold transition-all ${selectedTargetId === t.id ? 'border-indigo-600 bg-indigo-50 text-indigo-700 scale-105' : 'border-slate-200 text-slate-600 hover:border-indigo-300 hover:bg-slate-50'}`}>
+              {t.name}
+            </button>
+          ))}
+          {votedTargetIds.filter(id => id !== voterIdentity).map(id => {
+            const t = session.targets.find(t => t.id === id);
+            if (!t) return null;
+            return (
+              <div key={id} className="p-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-sm font-bold text-slate-300 flex items-center justify-center gap-1">
+                <Check size={14} /> {t.name}
               </div>
-            ))}
-          </div>
-          <div className="pt-4 border-t border-dashed border-slate-200">
-            <label className="block text-base font-bold text-slate-800 mb-2 flex items-center gap-2">
-              <MessageSquare size={18} className="text-slate-400" />
-              給他們的回饋 (選填)
-            </label>
-            <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)}
-              className="w-full p-4 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-slate-50 focus:bg-white transition-colors"
-              rows="3" placeholder="寫下您的鼓勵或具體建議，將會匿名顯示給主辦單位..."></textarea>
-          </div>
-          <button onClick={submitVote} disabled={!isComplete || isSubmitting}
-            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-indigo-200 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
-            {isSubmitting ? '送出中...' : (
-              <>送出評分{targetsToVote.length > 1 && <span className="font-normal text-indigo-200 text-sm">(下一位: {targetsToVote[1].name})</span>}</>
-            )}
-          </button>
+            );
+          })}
         </div>
       </div>
+
+      {/* 評分表單（只有選了對象才顯示） */}
+      {selectedTarget && (
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="bg-indigo-600 p-6 text-center text-white">
+            <p className="text-indigo-200 font-medium text-sm mb-1 uppercase tracking-widest">目前評分對象</p>
+            <h2 className="text-3xl font-black">{selectedTarget.name}</h2>
+          </div>
+          <div className="p-6 sm:p-8 space-y-8">
+            <div className="space-y-6">
+              {session.criteria.map((c, idx) => (
+                <div key={c.id} className="bg-slate-50 p-5 rounded-2xl border border-slate-100 relative">
+                  <div className="absolute -left-3 -top-3 w-8 h-8 bg-indigo-100 text-indigo-700 font-bold rounded-full flex items-center justify-center border-4 border-white shadow-sm">{idx + 1}</div>
+                  <div className="flex justify-between items-end mb-4 ml-2">
+                    <label className="block text-lg font-bold text-slate-800">{c.name}</label>
+                    <span className="text-sm font-medium text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">滿分 {c.maxScore}</span>
+                  </div>
+                  {c.maxScore <= 10 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {Array.from({ length: c.maxScore }, (_, i) => i + 1).map(val => (
+                        <button key={val} onClick={() => handleScoreChange(c.id, val)}
+                          className={`flex-1 min-w-[40px] py-3 rounded-xl font-bold text-lg transition-all ${scores[c.id] === val ? 'bg-indigo-600 text-white shadow-md transform scale-105' : 'bg-white border-2 border-slate-200 text-slate-600 hover:border-indigo-300 hover:bg-indigo-50'}`}>
+                          {val}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-4">
+                      <input type="range" min="0" max={c.maxScore} value={scores[c.id] || 0}
+                        onChange={(e) => handleScoreChange(c.id, e.target.value)}
+                        className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
+                      <input type="number" min="0" max={c.maxScore} value={scores[c.id] || ''}
+                        onChange={(e) => handleScoreChange(c.id, e.target.value)}
+                        placeholder="輸入"
+                        className="w-24 p-3 text-center font-bold text-lg border-2 border-slate-200 rounded-xl focus:border-indigo-500 outline-none" />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="pt-4 border-t border-dashed border-slate-200">
+              <label className="block text-base font-bold text-slate-800 mb-2 flex items-center gap-2">
+                <MessageSquare size={18} className="text-slate-400" />
+                給他們的回饋 (選填)
+              </label>
+              <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)}
+                className="w-full p-4 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-slate-50 focus:bg-white transition-colors"
+                rows="3" placeholder="寫下您的鼓勵或具體建議，將會匿名顯示給主辦單位..."></textarea>
+            </div>
+            <button onClick={submitVote} disabled={!isComplete || isSubmitting}
+              className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-indigo-200 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+              {isSubmitting ? '送出中...' : '送出評分，選擇下一位'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

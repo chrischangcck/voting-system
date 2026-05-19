@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Settings, BarChart3, Users, Plus, Trash2, ArrowUp, ArrowDown, 
-  ExternalLink, QrCode, Copy, CheckCircle, Check, Play, User, 
-  AlertCircle, ChevronDown, ChevronUp, MessageSquare 
+import {
+  Settings, BarChart3, Users, Plus, Trash2, ArrowUp, ArrowDown,
+  ExternalLink, QrCode, Copy, CheckCircle, Check, Play, User,
+  AlertCircle, ChevronDown, ChevronUp, MessageSquare, History
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, collection, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
+import {
+  getFirestore, doc, collection, setDoc, getDoc,
+  onSnapshot, getDocs, deleteDoc
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDesW9k9QxZlDZL0Bo1796UQDloso3bfbg",
@@ -20,27 +23,32 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// ─── 主 App ────────────────────────────────────────────────
 export default function App() {
-  const [view, setView] = useState('setup');
+  const [view, setView] = useState('voter');
   const [sessionCode, setSessionCode] = useState(null);
   const [user] = useState({ uid: 'host-' + Math.random().toString(36).substring(2, 9) });
-  const [joinCodeInput, setJoinCodeInput] = useState('');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('session');
+    const isHost = params.get('host');
     if (code) {
       setSessionCode(code.trim().toUpperCase());
       setView('voting');
+    } else if (isHost === 'true') {
+      setView('host');
     }
   }, []);
 
-  const handleJoin = (e) => {
-    e.preventDefault();
-    if (joinCodeInput.trim()) {
-      setSessionCode(joinCodeInput.trim().toUpperCase());
-      setView('voting');
+  const goBack = () => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('host') === 'true') {
+      setView('host');
+    } else {
+      setView('voter');
     }
+    window.history.pushState({}, '', window.location.pathname + (params.get('host') ? '?host=true' : ''));
   };
 
   return (
@@ -51,52 +59,67 @@ export default function App() {
             <BarChart3 className="text-indigo-500" />
             <span className="hidden sm:inline">課程即時評分系統</span>
           </div>
-          <div className="flex items-center gap-4">
-            {view === 'setup' && (
-              <form onSubmit={handleJoin} className="flex items-center">
-                <input 
-                  type="text" 
-                  placeholder="輸入代碼加入活動" 
-                  className="border border-slate-300 rounded-l-md px-3 py-1.5 text-sm w-36 focus:outline-none focus:border-indigo-500 uppercase"
-                  value={joinCodeInput}
-                  onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                />
-                <button type="submit" className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-r-md text-sm font-medium border border-l-0 border-slate-300 hover:bg-indigo-100 transition-colors">
-                  加入
-                </button>
-              </form>
-            )}
-            {view !== 'setup' && (
-              <button 
-                onClick={() => {
-                  setView('setup');
-                  window.history.pushState({}, '', window.location.pathname);
-                }}
-                className="text-slate-500 hover:text-slate-700 text-sm font-medium flex items-center gap-1"
-              >
+          <div className="flex items-center gap-3">
+            {(view === 'dashboard' || view === 'voting' || view === 'history') && (
+              <button onClick={goBack} className="text-slate-500 hover:text-slate-700 text-sm font-medium flex items-center gap-1">
                 <Settings size={16} /> 返回首頁
+              </button>
+            )}
+            {view === 'host' && (
+              <button onClick={() => setView('history')} className="text-slate-500 hover:text-slate-700 text-sm font-medium flex items-center gap-1">
+                <History size={16} /> 歷史活動
               </button>
             )}
           </div>
         </div>
       </header>
-
       <main className="max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
-        {view === 'setup' && <AdminSetup user={user} setView={setView} setSessionCode={setSessionCode} />}
+        {view === 'voter'     && <VoterEntry setView={setView} setSessionCode={setSessionCode} />}
+        {view === 'host'      && <AdminSetup user={user} setView={setView} setSessionCode={setSessionCode} />}
         {view === 'dashboard' && <AdminDashboard user={user} sessionCode={sessionCode} setView={setView} />}
-        {view === 'voting' && <VoterInterface user={user} sessionCode={sessionCode} />}
+        {view === 'voting'    && <VoterInterface user={user} sessionCode={sessionCode} />}
+        {view === 'history'   && <HistoryList setView={setView} setSessionCode={setSessionCode} />}
       </main>
     </div>
   );
 }
 
+// ─── 評分人入口頁 ────────────────────────────────────────────
+function VoterEntry({ setView, setSessionCode }) {
+  const [code, setCode] = useState('');
+  const handleJoin = (e) => {
+    e.preventDefault();
+    if (code.trim()) { setSessionCode(code.trim().toUpperCase()); setView('voting'); }
+  };
+  return (
+    <div className="min-h-[70vh] flex flex-col items-center justify-center">
+      <div className="w-full max-w-sm bg-white rounded-3xl shadow-sm border border-slate-200 p-10 text-center">
+        <div className="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+          <BarChart3 className="text-indigo-600" size={32} />
+        </div>
+        <h1 className="text-2xl font-black text-slate-900 mb-2">課程即時評分系統</h1>
+        <p className="text-slate-500 text-sm mb-8">請輸入主辦單位提供的活動代碼加入評分</p>
+        <form onSubmit={handleJoin} className="space-y-4">
+          <input type="text" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())}
+            placeholder="輸入活動代碼"
+            className="w-full p-4 text-center text-2xl font-black tracking-widest border-2 border-slate-200 rounded-xl focus:border-indigo-500 outline-none uppercase"
+            maxLength={8} />
+          <button type="submit" className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg shadow-md transition-all active:scale-[0.98]">
+            加入活動
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── 主辦單位設定頁 ──────────────────────────────────────────
 function AdminSetup({ user, setView, setSessionCode }) {
   const [title, setTitle] = useState("期末專案發表評分");
   const [mode, setMode] = useState('group');
   const [participantCount, setParticipantCount] = useState(5);
   const [customNames, setCustomNames] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
   const [criteria, setCriteria] = useState([
     { id: 'c1', name: '內容與創意', maxScore: 10, weight: 50 },
     { id: 'c2', name: '表達與台風', maxScore: 10, weight: 30 },
@@ -111,76 +134,29 @@ function AdminSetup({ user, setView, setSessionCode }) {
     setCustomNames(newNames);
   }, [participantCount, mode]);
 
-  const addCriterion = () => {
-    setCriteria([...criteria, { 
-      id: `c${Date.now()}`, 
-      name: `新指標 ${criteria.length + 1}`, 
-      maxScore: 10, 
-      weight: 0 
-    }]);
-  };
-
-  const updateCriterion = (id, field, value) => {
-    setCriteria(criteria.map(c => c.id === id ? { ...c, [field]: value } : c));
-  };
-
-  const removeCriterion = (id) => {
-    if (criteria.length <= 1) return;
-    setCriteria(criteria.filter(c => c.id !== id));
-  };
-
-  const moveCriterion = (index, direction) => {
-    if ((direction === -1 && index === 0) || (direction === 1 && index === criteria.length - 1)) return;
-    const newCriteria = [...criteria];
-    const temp = newCriteria[index];
-    newCriteria[index] = newCriteria[index + direction];
-    newCriteria[index + direction] = temp;
-    setCriteria(newCriteria);
-  };
-
-  const handleCustomNameChange = (index, value) => {
-    setCustomNames({ ...customNames, [index]: value });
+  const addCriterion = () => setCriteria([...criteria, { id: `c${Date.now()}`, name: `新指標 ${criteria.length + 1}`, maxScore: 10, weight: 0 }]);
+  const updateCriterion = (id, field, value) => setCriteria(criteria.map(c => c.id === id ? { ...c, [field]: value } : c));
+  const removeCriterion = (id) => { if (criteria.length <= 1) return; setCriteria(criteria.filter(c => c.id !== id)); };
+  const moveCriterion = (index, dir) => {
+    if ((dir === -1 && index === 0) || (dir === 1 && index === criteria.length - 1)) return;
+    const nc = [...criteria]; const tmp = nc[index]; nc[index] = nc[index + dir]; nc[index + dir] = tmp; setCriteria(nc);
   };
 
   const createSession = async () => {
     setIsSubmitting(true);
     const totalWeight = criteria.reduce((sum, c) => sum + Number(c.weight), 0);
-    const normalizedCriteria = criteria.map(c => ({
-      ...c,
-      weight: totalWeight > 0 ? Math.round((Number(c.weight) / totalWeight) * 100) : 0
-    }));
-
+    const nc = criteria.map(c => ({ ...c, weight: totalWeight > 0 ? Math.round((Number(c.weight) / totalWeight) * 100) : 0 }));
     const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const targets = [];
-    for (let i = 1; i <= participantCount; i++) {
-      targets.push({
-        id: `t${i}`,
-        name: customNames[i] || (mode === 'group' ? `第 ${i} 組` : `第 ${i} 位`),
-        order: i
-      });
-    }
-
-    const sessionData = {
-      title,
-      hostId: user.uid,
-      mode,
-      createdAt: new Date().toISOString(),
-      criteria: normalizedCriteria,
-      targets,
-      status: 'active'
-    };
-
+    const targets = Array.from({ length: participantCount }, (_, i) => ({
+      id: `t${i + 1}`,
+      name: customNames[i + 1] || (mode === 'group' ? `第 ${i + 1} 組` : `第 ${i + 1} 位`),
+      order: i + 1
+    }));
     try {
-      const sessionRef = doc(db, 'sessions', code);
-      await setDoc(sessionRef, sessionData);
-      setSessionCode(code);
-      setView('dashboard');
-    } catch (err) {
-      console.error("Error creating session:", err);
-      alert("建立活動時發生錯誤，請確認 Firebase 規則是否允許寫入。");
-    } finally {
-      setIsSubmitting(false);
-    }
+      await setDoc(doc(db, 'sessions', code), { title, hostId: user.uid, mode, createdAt: new Date().toISOString(), criteria: nc, targets, status: 'active' });
+      setSessionCode(code); setView('dashboard');
+    } catch { alert("建立活動時發生錯誤，請確認 Firebase 規則。"); }
+    finally { setIsSubmitting(false); }
   };
 
   const totalWeight = criteria.reduce((sum, c) => sum + Number(c.weight), 0);
@@ -188,63 +164,38 @@ function AdminSetup({ user, setView, setSessionCode }) {
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-          <Settings className="text-indigo-500" />
-          1. 基本設定
-        </h2>
+        <h2 className="text-xl font-bold mb-6 flex items-center gap-2"><Settings className="text-indigo-500" />1. 基本設定</h2>
         <div className="space-y-5">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">活動名稱</label>
-            <input 
-              type="text" 
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-lg"
-              placeholder="例如：期末專案發表評分"
-            />
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-lg" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">評分對象模式</label>
               <div className="flex bg-slate-100 p-1 rounded-lg">
-                <button 
-                  onClick={() => setMode('group')}
-                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${mode === 'group' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
-                >小組模式</button>
-                <button 
-                  onClick={() => setMode('individual')}
-                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${mode === 'individual' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
-                >個人模式</button>
+                <button onClick={() => setMode('group')} className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${mode === 'group' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500'}`}>小組模式</button>
+                <button onClick={() => setMode('individual')} className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${mode === 'individual' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500'}`}>個人模式</button>
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                {mode === 'group' ? '總組數' : '總人數'}
-              </label>
-              <input 
-                type="number" 
-                min="2" max="50"
-                value={participantCount}
+              <label className="block text-sm font-medium text-slate-700 mb-1">{mode === 'group' ? '總組數' : '總人數'}</label>
+              <input type="number" min="2" max="50" value={participantCount}
                 onChange={(e) => setParticipantCount(Math.max(2, parseInt(e.target.value) || 2))}
-                className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
+                className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
             </div>
           </div>
           <div className="pt-2">
             <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center justify-between">
-              <span>自訂名稱 (選填)</span>
-              <span className="text-xs text-slate-400 font-normal">若留白則使用預設名稱</span>
+              <span>自訂名稱 (選填)</span><span className="text-xs text-slate-400">若留白則使用預設名稱</span>
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1">
               {Array.from({ length: participantCount }, (_, i) => i + 1).map(num => (
-                <input
-                  key={num}
-                  type="text"
-                  value={customNames[num] || ''}
-                  onChange={(e) => handleCustomNameChange(num, e.target.value)}
+                <input key={num} type="text" value={customNames[num] || ''}
+                  onChange={(e) => setCustomNames({ ...customNames, [num]: e.target.value })}
                   placeholder={mode === 'group' ? `第 ${num} 組` : `第 ${num} 位`}
-                  className="w-full p-2 text-sm border border-slate-200 rounded-md focus:border-indigo-400 focus:ring-1 outline-none"
-                />
+                  className="w-full p-2 text-sm border border-slate-200 rounded-md focus:border-indigo-400 outline-none" />
               ))}
             </div>
           </div>
@@ -253,20 +204,15 @@ function AdminSetup({ user, setView, setSessionCode }) {
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <BarChart3 className="text-indigo-500" />
-            2. 評分指標設定
-          </h2>
+          <h2 className="text-xl font-bold flex items-center gap-2"><BarChart3 className="text-indigo-500" />2. 評分指標設定</h2>
           <span className={`text-sm font-medium px-2 py-1 rounded-md ${totalWeight === 100 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-            總權重: {totalWeight}% {totalWeight !== 100 && '(系統將自動換算為100%)'}
+            總權重: {totalWeight}% {totalWeight !== 100 && '(系統將自動換算)'}
           </span>
         </div>
         <div className="space-y-3">
           <div className="grid grid-cols-12 gap-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-            <div className="col-span-1 text-center">排序</div>
-            <div className="col-span-5">指標名稱</div>
-            <div className="col-span-2 text-center">最高分</div>
-            <div className="col-span-3 text-center">權重 (%)</div>
+            <div className="col-span-1 text-center">排序</div><div className="col-span-5">指標名稱</div>
+            <div className="col-span-2 text-center">最高分</div><div className="col-span-3 text-center">權重(%)</div>
             <div className="col-span-1 text-center">刪除</div>
           </div>
           {criteria.map((c, index) => (
@@ -275,32 +221,17 @@ function AdminSetup({ user, setView, setSessionCode }) {
                 <button onClick={() => moveCriterion(index, -1)} disabled={index === 0} className="p-1 text-slate-400 hover:text-indigo-600 disabled:opacity-30"><ArrowUp size={16} /></button>
                 <button onClick={() => moveCriterion(index, 1)} disabled={index === criteria.length - 1} className="p-1 text-slate-400 hover:text-indigo-600 disabled:opacity-30"><ArrowDown size={16} /></button>
               </div>
-              <div className="col-span-5">
-                <input type="text" value={c.name} onChange={(e) => updateCriterion(c.id, 'name', e.target.value)}
-                  className="w-full p-2 text-sm border-0 bg-white rounded shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-              </div>
+              <div className="col-span-5"><input type="text" value={c.name} onChange={(e) => updateCriterion(c.id, 'name', e.target.value)} className="w-full p-2 text-sm border-0 bg-white rounded shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none" /></div>
               <div className="col-span-2">
-                <select value={c.maxScore} onChange={(e) => updateCriterion(c.id, 'maxScore', Number(e.target.value))}
-                  className="w-full p-2 text-sm border-0 bg-white rounded shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer">
-                  <option value={5}>5 分制</option>
-                  <option value={7}>7 分制</option>
-                  <option value={10}>10 分制</option>
-                  <option value={100}>100 分制</option>
+                <select value={c.maxScore} onChange={(e) => updateCriterion(c.id, 'maxScore', Number(e.target.value))} className="w-full p-2 text-sm border-0 bg-white rounded shadow-sm outline-none cursor-pointer">
+                  <option value={5}>5 分制</option><option value={7}>7 分制</option><option value={10}>10 分制</option><option value={100}>100 分制</option>
                 </select>
               </div>
-              <div className="col-span-3 px-2">
-                <input type="number" min="0" max="100" value={c.weight} onChange={(e) => updateCriterion(c.id, 'weight', Number(e.target.value))}
-                  className="w-full p-2 text-sm border-0 bg-white rounded shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none text-center" />
-              </div>
-              <div className="col-span-1 flex justify-center">
-                <button onClick={() => removeCriterion(c.id)} disabled={criteria.length <= 1} className="p-2 text-slate-400 hover:text-red-500 rounded-md disabled:opacity-50">
-                  <Trash2 size={18} />
-                </button>
-              </div>
+              <div className="col-span-3 px-2"><input type="number" min="0" max="100" value={c.weight} onChange={(e) => updateCriterion(c.id, 'weight', Number(e.target.value))} className="w-full p-2 text-sm border-0 bg-white rounded shadow-sm outline-none text-center" /></div>
+              <div className="col-span-1 flex justify-center"><button onClick={() => removeCriterion(c.id)} disabled={criteria.length <= 1} className="p-2 text-slate-400 hover:text-red-500 disabled:opacity-50"><Trash2 size={18} /></button></div>
             </div>
           ))}
-          <button onClick={addCriterion}
-            className="w-full py-3 mt-4 border-2 border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors">
+          <button onClick={addCriterion} className="w-full py-3 mt-4 border-2 border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 rounded-xl font-medium flex items-center justify-center gap-2 transition-colors">
             <Plus size={18} /> 新增評分指標
           </button>
         </div>
@@ -314,6 +245,7 @@ function AdminSetup({ user, setView, setSessionCode }) {
   );
 }
 
+// ─── 主辦單位儀表板 ──────────────────────────────────────────
 function AdminDashboard({ user, sessionCode, setView }) {
   const [session, setSession] = useState(null);
   const [votes, setVotes] = useState([]);
@@ -323,19 +255,14 @@ function AdminDashboard({ user, sessionCode, setView }) {
   const [showProgressDetail, setShowProgressDetail] = useState(false);
 
   useEffect(() => {
-    const sessionRef = doc(db, 'sessions', sessionCode);
-    const unsubSession = onSnapshot(sessionRef, (docSnap) => {
-      if (docSnap.exists()) setSession(docSnap.data());
+    const unsubSession = onSnapshot(doc(db, 'sessions', sessionCode), (snap) => {
+      if (snap.exists()) setSession(snap.data());
       setLoading(false);
     });
-    const votesRef = collection(db, 'votes');
-    const unsubVotes = onSnapshot(votesRef, (snapshot) => {
-      const votesData = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.sessionId === sessionCode) votesData.push({ id: docSnap.id, ...data });
-      });
-      setVotes(votesData);
+    const unsubVotes = onSnapshot(collection(db, 'votes'), (snap) => {
+      const data = [];
+      snap.forEach(d => { if (d.data().sessionId === sessionCode) data.push({ id: d.id, ...d.data() }); });
+      setVotes(data);
     });
     return () => { unsubSession(); unsubVotes(); };
   }, [sessionCode]);
@@ -344,98 +271,63 @@ function AdminDashboard({ user, sessionCode, setView }) {
   if (!session) return <div className="text-center p-12 text-slate-500">找不到此活動。</div>;
 
   const results = session.targets.map(target => {
-    const receivedVotes = votes.filter(v => v.targetId === target.id);
-    let totalWeightedScore = 0;
-    const criteriaScores = {};
-    session.criteria.forEach(c => criteriaScores[c.id] = { sum: 0, count: 0, avg: 0 });
+    const rv = votes.filter(v => v.targetId === target.id);
+    let totalW = 0;
+    const cs = {};
+    session.criteria.forEach(c => cs[c.id] = { sum: 0, count: 0, avg: 0 });
     const feedbackList = [];
-    receivedVotes.forEach(vote => {
-      let voteTotal = 0;
+    rv.forEach(vote => {
+      let vt = 0;
       session.criteria.forEach(c => {
-        const score = vote.scores[c.id];
-        if (score !== undefined) {
-          criteriaScores[c.id].sum += score;
-          criteriaScores[c.id].count += 1;
-          const percentageScore = (score / c.maxScore) * 100;
-          voteTotal += percentageScore * (c.weight / 100);
-        }
+        const s = vote.scores[c.id];
+        if (s !== undefined) { cs[c.id].sum += s; cs[c.id].count += 1; vt += (s / c.maxScore) * 100 * (c.weight / 100); }
       });
-      totalWeightedScore += voteTotal;
-      if (vote.feedback && vote.feedback.trim() !== '') feedbackList.push(vote.feedback);
+      totalW += vt;
+      if (vote.feedback?.trim()) feedbackList.push(vote.feedback);
     });
-    const voteCount = receivedVotes.length;
-    const finalScore = voteCount > 0 ? (totalWeightedScore / voteCount) : 0;
-    session.criteria.forEach(c => {
-      if (criteriaScores[c.id].count > 0) criteriaScores[c.id].avg = criteriaScores[c.id].sum / criteriaScores[c.id].count;
-    });
-    return { ...target, voteCount, finalScore: Number(finalScore.toFixed(2)), criteriaScores, feedbackList };
+    const voteCount = rv.length;
+    const finalScore = voteCount > 0 ? totalW / voteCount : 0;
+    session.criteria.forEach(c => { if (cs[c.id].count > 0) cs[c.id].avg = cs[c.id].sum / cs[c.id].count; });
+    return { ...target, voteCount, finalScore: Number(finalScore.toFixed(2)), criteriaScores: cs, feedbackList };
   });
   results.sort((a, b) => b.finalScore - a.finalScore);
 
-  // 計算評分進度：每個 voter 需要對所有其他 target 完成評分才算完成
   const totalTargets = session.targets.length;
-  const requiredVotesPerVoter = session.mode === 'group' ? totalTargets - 1 : totalTargets;
+  const required = session.mode === 'group' ? totalTargets - 1 : totalTargets;
   const voterProgress = session.targets.map(target => {
-    const myVotes = votes.filter(v => v.voterId === target.id);
-    const done = myVotes.length >= requiredVotesPerVoter;
-    return { ...target, votedCount: myVotes.length, required: requiredVotesPerVoter, done };
+    const count = votes.filter(v => v.voterId === target.id).length;
+    const status = count === 0 ? 'none' : count >= required ? 'done' : 'partial';
+    return { ...target, votedCount: count, required, status };
   });
-  const completedCount = voterProgress.filter(v => v.done).length;
+  const doneCount = voterProgress.filter(v => v.status === 'done').length;
+  const partialCount = voterProgress.filter(v => v.status === 'partial').length;
 
-  const currentHref = window.location.href.split('?')[0];
-  const votingUrl = `${currentHref}?session=${sessionCode}`;
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(votingUrl)}`;
-
-  const fallbackCopy = (text) => {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.style.position = "fixed";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-      document.execCommand('copy');
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      alert("複製失敗，請手動選取網址複製：" + text);
-    }
-    document.body.removeChild(textArea);
-  };
+  const baseUrl = window.location.href.split('?')[0];
+  const votingUrl = `${baseUrl}?session=${sessionCode}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(votingUrl)}`;
 
   const copyLink = () => {
+    const fallback = (text) => {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { alert('請手動複製：' + text); }
+      document.body.removeChild(ta);
+    };
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(votingUrl)
-        .then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })
-        .catch(() => fallbackCopy(votingUrl));
-    } else {
-      fallbackCopy(votingUrl);
-    }
+      navigator.clipboard.writeText(votingUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => fallback(votingUrl));
+    } else fallback(votingUrl);
   };
 
-  const toggleExpand = (targetId) => setExpandedTarget(expandedTarget === targetId ? null : targetId);
-
-  // 下載 Excel（純 CSV 格式，用 .csv 副檔名，Excel 可直接開啟）
-  const downloadExcel = () => {
+  const downloadCSV = () => {
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const BOM = '\uFEFF';
     const headers = ['名次', '名稱', '總分(100分制)', '收到票數', ...session.criteria.map(c => `${c.name}(平均/${c.maxScore}分)`), '文字回饋'];
-    const rows = results.map((r, idx) => [
-      idx + 1,
-      r.name,
-      r.finalScore,
-      r.voteCount,
-      ...session.criteria.map(c => r.criteriaScores[c.id].avg.toFixed(1)),
-      r.feedbackList.join(' | ')
-    ]);
-    const csvContent = BOM + [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const rows = results.map((r, i) => [i + 1, r.name, r.finalScore, r.voteCount, ...session.criteria.map(c => r.criteriaScores[c.id].avg.toFixed(1)), r.feedbackList.join(' | ')]);
+    const csv = BOM + [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const a = document.createElement('a');
-    a.href = url;
-    const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
     a.download = `${session.title}_評分結果_${sessionCode}_${dateStr}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -448,70 +340,56 @@ function AdminDashboard({ user, sessionCode, setView }) {
             <span className="text-slate-600 font-medium">即時結果儀表板</span>
             <span className="text-slate-400 text-sm ml-2">| 共收到 {votes.length} 筆評分</span>
           </div>
-          <div className="mt-6 flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+          <div className="mt-6 flex flex-wrap gap-3">
             <div className="px-4 py-3 bg-indigo-50 rounded-xl border border-indigo-100">
-              <div className="text-xs text-indigo-800 font-bold mb-1 uppercase tracking-wider">活動參與代碼</div>
-              <div className="text-4xl font-black text-indigo-600 tracking-widest">{sessionCode}</div>
+              <div className="text-xs text-indigo-800 font-bold mb-1 uppercase tracking-wider">活動代碼</div>
+              <div className="text-3xl font-black text-indigo-600 tracking-widest">{sessionCode}</div>
             </div>
-            <button onClick={() => setView('voting')}
-              className="flex items-center gap-2 px-5 py-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium rounded-xl transition-colors h-[68px]">
-              <User size={20} className="text-slate-400" />
-              <div className="text-left leading-tight">
-                <div>模擬學生投票</div>
-                <div className="text-xs text-slate-500">不用跳轉即可測試</div>
-              </div>
+            <button onClick={() => setView('voting')} className="flex items-center gap-2 px-5 py-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium rounded-xl transition-colors">
+              <User size={18} className="text-slate-400" />
+              <div className="text-left leading-tight text-sm"><div>模擬投票</div><div className="text-xs text-slate-400">測試用</div></div>
             </button>
-            <button onClick={downloadExcel}
-              className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl transition-colors h-[68px]">
-              <ExternalLink size={20} />
-              <div className="text-left leading-tight">
-                <div>下載結果</div>
-                <div className="text-xs text-emerald-200">Excel / CSV 格式</div>
-              </div>
+            <button onClick={downloadCSV} className="flex items-center gap-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl transition-colors">
+              <ExternalLink size={18} />
+              <div className="text-left leading-tight text-sm"><div>下載結果</div><div className="text-xs text-emerald-200">CSV / Excel</div></div>
             </button>
           </div>
         </div>
-        <div className="flex flex-col items-center gap-3 bg-slate-50 p-5 rounded-2xl border border-slate-200 w-full md:w-64 shrink-0">
+        <div className="flex flex-col items-center gap-3 bg-slate-50 p-5 rounded-2xl border border-slate-200 w-full md:w-56 shrink-0">
           <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-100">
-            <img src={qrCodeUrl} alt="QR Code" className="w-32 h-32" />
+            <img src={qrUrl} alt="QR Code" className="w-28 h-28" />
           </div>
-          <div className="flex gap-2 w-full mt-1">
-            <button onClick={copyLink} className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-white border border-slate-300 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors text-slate-700">
-              {copied ? <Check size={16} className="text-emerald-500"/> : <Copy size={16} className="text-slate-400"/>}
+          <div className="flex gap-2 w-full">
+            <button onClick={copyLink} className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 bg-white border border-slate-300 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors text-slate-700">
+              {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} className="text-slate-400" />}
               {copied ? '已複製' : '複製連結'}
             </button>
-            <a href={qrCodeUrl} download={`QRCode_${sessionCode}.png`} target="_blank" rel="noreferrer"
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
-              <QrCode size={16} /> 下載 QR
+            <a href={qrUrl} download={`QRCode_${sessionCode}.png`} target="_blank" rel="noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors">
+              <QrCode size={14} /> 下載 QR
             </a>
           </div>
         </div>
       </div>
 
-      {/* 評分進度統計卡片 */}
+      {/* 評分進度 */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <button
-          onClick={() => setShowProgressDetail(!showProgressDetail)}
-          className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors"
-        >
+        <button onClick={() => setShowProgressDetail(!showProgressDetail)}
+          className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
           <div className="flex items-center gap-4">
             <h3 className="font-bold text-lg text-slate-800">評分進度</h3>
             <div className="flex items-center gap-2">
-              <span className={`text-2xl font-black ${completedCount === totalTargets ? 'text-emerald-600' : 'text-amber-500'}`}>
-                {completedCount}
-              </span>
-              <span className="text-slate-400 font-bold text-lg">/</span>
+              <span className={`text-2xl font-black ${doneCount === totalTargets ? 'text-emerald-600' : 'text-amber-500'}`}>{doneCount}</span>
+              <span className="text-slate-400 font-bold">/</span>
               <span className="text-2xl font-black text-slate-400">{totalTargets}</span>
-              <span className="text-sm text-slate-500 ml-1">已完成評分</span>
+              <span className="text-sm text-slate-500 ml-1">已完成</span>
+              {partialCount > 0 && <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">{partialCount} 進行中</span>}
+              {doneCount === totalTargets && <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">全員完成</span>}
             </div>
-            {completedCount === totalTargets && (
-              <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-full">全員完成</span>
-            )}
           </div>
           <div className="flex items-center gap-3">
-            <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                style={{ width: `${totalTargets > 0 ? (completedCount / totalTargets) * 100 : 0}%` }} />
+            <div className="w-28 h-2 bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${totalTargets > 0 ? (doneCount / totalTargets) * 100 : 0}%` }} />
             </div>
             {showProgressDetail ? <ChevronUp className="text-slate-400" /> : <ChevronDown className="text-slate-400" />}
           </div>
@@ -519,41 +397,30 @@ function AdminDashboard({ user, sessionCode, setView }) {
 
         {showProgressDetail && (
           <div className="px-6 pb-6 border-t border-slate-100 animate-in slide-in-from-top-2 duration-200">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-              <div>
-                <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-2 flex items-center gap-1">
-                  <Check size={14} /> 已完成（{voterProgress.filter(v => v.done).length} 組）
-                </div>
-                <div className="space-y-2">
-                  {voterProgress.filter(v => v.done).length === 0 && (
-                    <div className="text-sm text-slate-400 italic">尚無人完成</div>
-                  )}
-                  {voterProgress.filter(v => v.done).map(v => (
-                    <div key={v.id} className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
-                      <CheckCircle size={16} className="text-emerald-500 shrink-0" />
-                      <span className="text-sm font-medium text-emerald-800">{v.name}</span>
-                      <span className="text-xs text-emerald-500 ml-auto">{v.votedCount}/{v.required} 筆</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+              {[
+                { key: 'done', label: '已完成', color: 'emerald', icon: <CheckCircle size={13} /> },
+                { key: 'partial', label: '進行中', color: 'blue', icon: <AlertCircle size={13} /> },
+                { key: 'none', label: '尚未開始', color: 'amber', icon: <AlertCircle size={13} /> },
+              ].map(({ key, label, color, icon }) => {
+                const items = voterProgress.filter(v => v.status === key);
+                return (
+                  <div key={key}>
+                    <div className={`text-xs font-bold text-${color}-600 uppercase tracking-wider mb-2 flex items-center gap-1`}>
+                      {icon} {label}（{items.length}）
                     </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center gap-1">
-                  <AlertCircle size={14} /> 未完成（{voterProgress.filter(v => !v.done).length} 組）
-                </div>
-                <div className="space-y-2">
-                  {voterProgress.filter(v => !v.done).length === 0 && (
-                    <div className="text-sm text-slate-400 italic">全員已完成</div>
-                  )}
-                  {voterProgress.filter(v => !v.done).map(v => (
-                    <div key={v.id} className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                      <AlertCircle size={16} className="text-amber-400 shrink-0" />
-                      <span className="text-sm font-medium text-amber-800">{v.name}</span>
-                      <span className="text-xs text-amber-500 ml-auto">{v.votedCount}/{v.required} 筆</span>
+                    <div className="space-y-2">
+                      {items.length === 0 && <div className="text-sm text-slate-400 italic">{key === 'none' ? '全員已開始' : '尚無'}</div>}
+                      {items.map(v => (
+                        <div key={v.id} className={`flex items-center gap-2 bg-${color}-50 border border-${color}-100 rounded-lg px-3 py-2`}>
+                          <span className={`text-sm font-medium text-${color}-800 flex-1`}>{v.name}</span>
+                          <span className={`text-xs text-${color}-500`}>{v.votedCount}/{v.required}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -568,7 +435,7 @@ function AdminDashboard({ user, sessionCode, setView }) {
         <div className="divide-y divide-slate-100">
           {results.map((r, index) => (
             <div key={r.id} className="transition-colors hover:bg-slate-50/50">
-              <div className="p-4 sm:p-6 flex items-center cursor-pointer select-none" onClick={() => toggleExpand(r.id)}>
+              <div className="p-4 sm:p-6 flex items-center cursor-pointer select-none" onClick={() => setExpandedTarget(expandedTarget === r.id ? null : r.id)}>
                 <div className="w-10 sm:w-16 text-center font-black text-2xl text-slate-300 shrink-0">{index + 1}</div>
                 <div className="flex-1 min-w-0 pr-4">
                   <h4 className="text-lg font-bold text-slate-900 truncate">{r.name}</h4>
@@ -581,7 +448,7 @@ function AdminDashboard({ user, sessionCode, setView }) {
                     )}
                   </div>
                 </div>
-                <div className="text-right flex items-center gap-4">
+                <div className="flex items-center gap-4">
                   <div className="text-3xl font-black text-indigo-600 tracking-tight">{r.finalScore}</div>
                   <div className="text-slate-400">{expandedTarget === r.id ? <ChevronUp /> : <ChevronDown />}</div>
                 </div>
@@ -592,19 +459,13 @@ function AdminDashboard({ user, sessionCode, setView }) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
                     {session.criteria.map(c => (
                       <div key={c.id} className="bg-slate-50 p-3 rounded-lg border border-slate-100 flex justify-between items-center">
-                        <div>
-                          <div className="text-sm font-medium text-slate-800">{c.name}</div>
-                          <div className="text-xs text-slate-500">權重 {c.weight}% | 滿分 {c.maxScore}</div>
-                        </div>
-                        <div className="text-lg font-bold text-slate-700">
-                          {r.criteriaScores[c.id].avg.toFixed(1)} <span className="text-xs font-normal text-slate-400">分</span>
-                        </div>
+                        <div><div className="text-sm font-medium text-slate-800">{c.name}</div><div className="text-xs text-slate-500">權重 {c.weight}% | 滿分 {c.maxScore}</div></div>
+                        <div className="text-lg font-bold text-slate-700">{r.criteriaScores[c.id].avg.toFixed(1)} <span className="text-xs font-normal text-slate-400">分</span></div>
                       </div>
                     ))}
                   </div>
                   {r.feedbackList.length > 0 && (
-                    <>
-                      <h5 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">匿名文字回饋</h5>
+                    <><h5 className="text-sm font-bold text-slate-700 mb-3 uppercase tracking-wider">匿名文字回饋</h5>
                       <div className="space-y-2">
                         {r.feedbackList.map((fb, idx) => (
                           <div key={idx} className="bg-indigo-50/50 p-3 rounded-lg text-sm text-slate-700 border border-indigo-100/50 relative">
@@ -626,93 +487,172 @@ function AdminDashboard({ user, sessionCode, setView }) {
   );
 }
 
+// ─── 歷史活動列表 ────────────────────────────────────────────
+function HistoryList({ setView, setSessionCode }) {
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(null);
+
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'sessions'));
+        const list = [];
+        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        setSessions(list);
+      } catch (err) { console.error(err); }
+      finally { setLoading(false); }
+    };
+    fetch();
+  }, []);
+
+  const handleDelete = async (code, title) => {
+    if (!window.confirm(`確定要刪除「${title}」（${code}）的所有資料嗎？此操作無法復原。`)) return;
+    setDeleting(code);
+    try {
+      const snap = await getDocs(collection(db, 'votes'));
+      const del = [];
+      snap.forEach(d => { if (d.data().sessionId === code) del.push(deleteDoc(doc(db, 'votes', d.id))); });
+      await Promise.all(del);
+      await deleteDoc(doc(db, 'sessions', code));
+      setSessions(prev => prev.filter(s => s.id !== code));
+    } catch { alert('刪除失敗，請再試一次'); }
+    finally { setDeleting(null); }
+  };
+
+  if (loading) return <div className="flex justify-center p-12"><div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>;
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4 animate-in fade-in duration-300">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><History className="text-indigo-500" /> 歷史活動</h2>
+        <span className="text-sm text-slate-500">共 {sessions.length} 筆</span>
+      </div>
+      {sessions.length === 0 && <div className="text-center py-16 text-slate-400">尚無歷史活動記錄</div>}
+      {sessions.map(s => (
+        <div key={s.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex items-center gap-4 hover:border-indigo-200 transition-colors">
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-slate-900 truncate">{s.title}</div>
+            <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
+              <span className="font-mono font-bold text-indigo-500">{s.id}</span>
+              <span>{s.mode === 'group' ? '小組模式' : '個人模式'}</span>
+              <span>{s.targets?.length} 組／人</span>
+              <span>{new Date(s.createdAt).toLocaleDateString('zh-TW')}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => { setSessionCode(s.id); setView('dashboard'); }}
+              className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-bold rounded-lg transition-colors">
+              查看結果
+            </button>
+            <button onClick={() => handleDelete(s.id, s.title)} disabled={deleting === s.id}
+              className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-500 text-sm font-bold rounded-lg transition-colors disabled:opacity-50">
+              {deleting === s.id ? '...' : <Trash2 size={16} />}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── 評分人介面 ──────────────────────────────────────────────
 function VoterInterface({ user, sessionCode }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [voterIdentity, setVoterIdentity] = useState('');
   const [hasStarted, setHasStarted] = useState(false);
-  // 使用者自行選擇要評的對象 id，null 表示尚未選擇
   const [selectedTargetId, setSelectedTargetId] = useState(null);
   const [scores, setScores] = useState({});
   const [feedback, setFeedback] = useState('');
   const [votedTargetIds, setVotedTargetIds] = useState([]);
+  const [myVoteRecords, setMyVoteRecords] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!sessionCode) return;
-    const fetchSession = async () => {
+    const fetch = async () => {
       try {
-        const sessionRef = doc(db, 'sessions', sessionCode);
-        const docSnap = await getDoc(sessionRef);
-        if (docSnap.exists()) {
-          setSession(docSnap.data());
-          const savedVotes = localStorage.getItem(`voted_${sessionCode}`);
-          if (savedVotes) setVotedTargetIds(JSON.parse(savedVotes));
-        } else {
-          setError("找不到此評分活動，請確認代碼或連結是否正確。");
-        }
-      } catch (err) {
-        setError("讀取活動資料時發生錯誤，請稍後再試。");
-      } finally {
-        setLoading(false);
-      }
+        const snap = await getDoc(doc(db, 'sessions', sessionCode));
+        if (snap.exists()) {
+          setSession(snap.data());
+          const saved = localStorage.getItem(`voted_${sessionCode}`);
+          if (saved) setVotedTargetIds(JSON.parse(saved));
+          const savedRec = localStorage.getItem(`records_${sessionCode}`);
+          if (savedRec) setMyVoteRecords(JSON.parse(savedRec));
+        } else { setError("找不到此評分活動，請確認代碼或連結是否正確。"); }
+      } catch { setError("讀取活動資料時發生錯誤，請稍後再試。"); }
+      finally { setLoading(false); }
     };
-    fetchSession();
+    fetch();
   }, [sessionCode]);
 
-  // 可評分的對象：排除自己（小組模式）、已評過的
-  const availableTargets = session
-    ? session.targets.filter(t => t.id !== voterIdentity && !votedTargetIds.includes(t.id))
-    : [];
+  const availableTargets = session ? session.targets.filter(t => t.id !== voterIdentity && !votedTargetIds.includes(t.id)) : [];
 
   const handleStart = (e) => {
     e.preventDefault();
     if (!voterIdentity && session.mode === 'group') { alert("請選擇您的組別"); return; }
-    if (session.mode === 'individual' && !voterIdentity) {
-      setVoterIdentity('indv_' + Math.random().toString(36).substring(2, 9));
-    }
+    if (session.mode === 'individual' && !voterIdentity) setVoterIdentity('indv_' + Math.random().toString(36).substring(2, 9));
     setHasStarted(true);
   };
 
-  const handleScoreChange = (criterionId, val) => setScores(prev => ({ ...prev, [criterionId]: Number(val) }));
-
-  const handleSelectTarget = (targetId) => {
-    setSelectedTargetId(targetId);
-    setScores({});
-    setFeedback('');
-  };
+  const handleSelectTarget = (id) => { setSelectedTargetId(id); setScores({}); setFeedback(''); };
+  const handleScoreChange = (cid, val) => setScores(prev => ({ ...prev, [cid]: Number(val) }));
 
   const submitVote = async () => {
     if (!selectedTargetId) { alert("請先選擇要評分的對象"); return; }
-    const missingScores = session.criteria.some(c => scores[c.id] === undefined);
-    if (missingScores) { alert("請完成所有指標的評分"); return; }
-
+    if (session.criteria.some(c => scores[c.id] === undefined)) { alert("請完成所有指標的評分"); return; }
     setIsSubmitting(true);
     const target = session.targets.find(t => t.id === selectedTargetId);
     try {
       const voteId = `${sessionCode}_${voterIdentity || 'anon'}_${target.id}_${Date.now()}`;
-      const voteRef = doc(db, 'votes', voteId);
-      await setDoc(voteRef, {
-        sessionId: sessionCode,
-        voterId: voterIdentity || 'anonymous',
-        targetId: target.id,
-        scores: scores,
-        feedback: feedback.trim(),
-        timestamp: new Date().toISOString()
+      await setDoc(doc(db, 'votes', voteId), {
+        sessionId: sessionCode, voterId: voterIdentity || 'anonymous',
+        targetId: target.id, scores, feedback: feedback.trim(), timestamp: new Date().toISOString()
       });
-      const newVotedList = [...votedTargetIds, target.id];
-      setVotedTargetIds(newVotedList);
-      localStorage.setItem(`voted_${sessionCode}`, JSON.stringify(newVotedList));
-      // 評完後清空，讓使用者重新選下一組
-      setSelectedTargetId(null);
-      setScores({});
-      setFeedback('');
-    } catch (err) {
-      alert("送出評分時發生錯誤，請檢查網路連線。");
-    } finally {
-      setIsSubmitting(false);
-    }
+      const newVoted = [...votedTargetIds, target.id];
+      setVotedTargetIds(newVoted);
+      localStorage.setItem(`voted_${sessionCode}`, JSON.stringify(newVoted));
+      const record = { targetId: target.id, targetName: target.name, scores: { ...scores }, feedback: feedback.trim(), timestamp: new Date().toISOString() };
+      const newRec = [...myVoteRecords, record];
+      setMyVoteRecords(newRec);
+      localStorage.setItem(`records_${sessionCode}`, JSON.stringify(newRec));
+      setSelectedTargetId(null); setScores({}); setFeedback('');
+    } catch { alert("送出評分時發生錯誤，請檢查網路連線。"); }
+    finally { setIsSubmitting(false); }
+  };
+
+  const downloadPDF = () => {
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const voterName = session.targets.find(t => t.id === voterIdentity)?.name || '匿名';
+    const pdfTitle = `${session.title}_我的評分記錄_${voterName}_${dateStr}`;
+    const recordsHTML = session.targets.filter(t => t.id !== voterIdentity).map(t => {
+      const rec = myVoteRecords.find(r => r.targetId === t.id);
+      if (!rec) return `<div class="card"><div class="tname">${t.name}</div><div class="none">未評分</div></div>`;
+      const rows = session.criteria.map(c => `<div class="row"><span>${c.name}（滿分 ${c.maxScore}）</span><span class="score">${rec.scores[c.id] ?? '-'} 分</span></div>`).join('');
+      const fb = rec.feedback ? `<div class="fb"><div class="fbl">回饋內容</div>${rec.feedback}</div>` : '';
+      return `<div class="card"><div class="tname">${t.name}</div>${rows}${fb}</div>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>${pdfTitle}</title>
+    <style>body{font-family:sans-serif;padding:32px;color:#1e293b;max-width:680px;margin:0 auto}
+    h1{font-size:20px;font-weight:700;margin-bottom:4px}.meta{color:#64748b;font-size:12px;margin-bottom:24px;padding-bottom:12px;border-bottom:1px solid #e2e8f0}
+    .card{border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:14px}.tname{font-size:16px;font-weight:700;color:#4f46e5;margin-bottom:10px}
+    .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed #f1f5f9;font-size:13px}.row:last-of-type{border-bottom:none}
+    .score{font-weight:700}.fb{background:#f8fafc;border-radius:6px;padding:8px 10px;margin-top:10px;font-size:12px;color:#475569}
+    .fbl{font-weight:600;margin-bottom:3px;font-size:11px;text-transform:uppercase;color:#94a3b8}.none{color:#94a3b8;font-size:12px;font-style:italic}
+    .footer{margin-top:24px;color:#94a3b8;font-size:11px;text-align:center}@media print{body{padding:16px}}</style>
+    </head><body><h1>${session.title} — 我的評分記錄</h1>
+    <div class="meta">評分人：${voterName}　｜　活動代碼：${sessionCode}　｜　列印時間：${new Date().toLocaleString('zh-TW')}</div>
+    ${recordsHTML}<div class="footer">此記錄由課程即時評分系統自動產生</div></body></html>`;
+
+    const win = window.open('', '_blank');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 500);
   };
 
   if (loading) return <div className="min-h-[60vh] flex flex-col items-center justify-center"><div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div><p className="text-slate-500">載入活動中...</p></div>;
@@ -721,17 +661,14 @@ function VoterInterface({ user, sessionCode }) {
       <AlertCircle size={48} className="text-red-400 mx-auto mb-4" />
       <h3 className="text-xl font-bold text-slate-800 mb-2">無法加入活動</h3>
       <p className="text-slate-600 mb-6">{error}</p>
-      <button onClick={() => window.location.href = window.location.pathname} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-2 rounded-lg font-medium transition-colors">回首頁</button>
+      <button onClick={() => window.location.href = window.location.pathname} className="bg-slate-100 text-slate-700 px-6 py-2 rounded-lg font-medium">回首頁</button>
     </div>
   );
 
-  // 第一步：確認身分
   if (!hasStarted) {
     return (
       <div className="max-w-md mx-auto mt-8 bg-white p-8 rounded-2xl shadow-sm border border-slate-200 animate-in zoom-in-95 duration-300">
-        <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center mb-6 mx-auto">
-          <Users className="text-indigo-600" size={24} />
-        </div>
+        <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center mb-6 mx-auto"><Users className="text-indigo-600" size={24} /></div>
         <h2 className="text-2xl font-bold text-center text-slate-900 mb-2">{session.title}</h2>
         <p className="text-center text-slate-500 mb-8">準備開始進行評分，請先確認您的身分。</p>
         <form onSubmit={handleStart} className="space-y-6">
@@ -741,7 +678,7 @@ function VoterInterface({ user, sessionCode }) {
               <div className="grid grid-cols-2 gap-3">
                 {session.targets.map(t => (
                   <button key={t.id} type="button" onClick={() => setVoterIdentity(t.id)}
-                    className={`p-3 rounded-xl border-2 text-sm font-bold transition-all ${voterIdentity === t.id ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:border-indigo-200 hover:bg-slate-50'}`}>
+                    className={`p-3 rounded-xl border-2 text-sm font-bold transition-all ${voterIdentity === t.id ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:border-indigo-200'}`}>
                     {t.name}
                   </button>
                 ))}
@@ -754,70 +691,16 @@ function VoterInterface({ user, sessionCode }) {
               <p className="text-sm text-slate-400 mt-1">您可以直接點擊下方按鈕開始</p>
             </div>
           )}
-          <button type="submit" className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg shadow-md transition-all active:scale-[0.98]">
-            進入評分
-          </button>
+          <button type="submit" className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg shadow-md transition-all active:scale-[0.98]">進入評分</button>
         </form>
       </div>
     );
   }
 
-  // 下載 PDF（用瀏覽器列印功能產生 PDF）
-  const downloadPDF = () => {
-    const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
-    const voterName = session.targets.find(t => t.id === voterIdentity)?.name || '匿名';
-    const pdfTitle = `${session.title}_我的評分記錄_${voterName}_${dateStr}`;
-
-    const printContent = `
-      <!DOCTYPE html>
-      <html lang="zh-TW">
-      <head>
-        <meta charset="UTF-8">
-        <title>${pdfTitle}</title>
-        <style>
-          body { font-family: sans-serif; padding: 32px; color: #1e293b; }
-          h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
-          .meta { color: #64748b; font-size: 13px; margin-bottom: 24px; }
-          .card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-          .target-name { font-size: 18px; font-weight: 700; margin-bottom: 12px; color: #4f46e5; }
-          .criterion { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #f1f5f9; font-size: 14px; }
-          .criterion:last-child { border-bottom: none; }
-          .feedback { background: #f8fafc; border-radius: 8px; padding: 10px; margin-top: 10px; font-size: 13px; color: #475569; }
-          .feedback-label { font-weight: 600; margin-bottom: 4px; }
-          .not-voted { color: #94a3b8; font-size: 13px; font-style: italic; }
-          @media print { body { padding: 16px; } }
-        </style>
-      </head>
-      <body>
-        <h1>${session.title} — 我的評分記錄</h1>
-        <div class="meta">評分人：${session.targets.find(t => t.id === voterIdentity)?.name || '匿名'} ｜ 活動代碼：${sessionCode} ｜ 列印時間：${new Date().toLocaleString('zh-TW')}</div>
-        ${session.targets.filter(t => t.id !== voterIdentity).map(t => {
-          const voted = votedTargetIds.includes(t.id);
-          if (!voted) return `<div class="card"><div class="target-name">${t.name}</div><div class="not-voted">未評分</div></div>`;
-          return `
-            <div class="card">
-              <div class="target-name">${t.name}</div>
-              <div class="not-voted">（評分明細已記錄於系統，請向主辦單位查詢）</div>
-            </div>`;
-        }).join('')}
-        <div style="margin-top:24px; color:#94a3b8; font-size:12px;">此記錄由課程即時評分系統自動產生</div>
-      </body>
-      </html>
-    `;
-    const win = window.open('', '_blank');
-    win.document.write(printContent);
-    win.document.close();
-    win.focus();
-    setTimeout(() => { win.print(); }, 500);
-  };
-
-  // 全部評完
   if (availableTargets.length === 0) {
     return (
       <div className="max-w-md mx-auto mt-12 bg-white p-10 rounded-3xl shadow-sm border border-emerald-100 text-center animate-in zoom-in duration-500">
-        <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle className="text-emerald-500 w-10 h-10" />
-        </div>
+        <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6"><CheckCircle className="text-emerald-500 w-10 h-10" /></div>
         <h2 className="text-2xl font-black text-slate-800 mb-2">評分完成！</h2>
         <p className="text-slate-500 mb-6">您已經完成所有可評估對象的評分，感謝您的參與。</p>
         <button onClick={downloadPDF}
@@ -839,43 +722,31 @@ function VoterInterface({ user, sessionCode }) {
 
   return (
     <div className="max-w-2xl mx-auto animate-in fade-in duration-300 space-y-6">
-
-      {/* 進度條 */}
       <div>
         <div className="flex justify-between text-sm font-bold text-slate-500 mb-2">
-          <span>評分進度</span>
-          <span className="text-indigo-600">{votedCount} / {totalVotable} 完成</span>
+          <span>評分進度</span><span className="text-indigo-600">{votedCount} / {totalVotable} 完成</span>
         </div>
         <div className="h-3 w-full bg-slate-200 rounded-full overflow-hidden">
-          <div className="h-full bg-indigo-600 rounded-full transition-all duration-500 ease-out" style={{ width: `${progress}%` }}></div>
+          <div className="h-full bg-indigo-600 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
         </div>
       </div>
 
-      {/* 選擇評分對象 */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <h3 className="text-base font-bold text-slate-700 mb-4">
-          {session.mode === 'group' ? '請選擇要評分的組別' : '請選擇要評分的人員'}
-        </h3>
+        <h3 className="text-base font-bold text-slate-700 mb-4">{session.mode === 'group' ? '請選擇要評分的組別' : '請選擇要評分的人員'}</h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {availableTargets.map(t => (
             <button key={t.id} onClick={() => handleSelectTarget(t.id)}
-              className={`p-3 rounded-xl border-2 text-sm font-bold transition-all ${selectedTargetId === t.id ? 'border-indigo-600 bg-indigo-50 text-indigo-700 scale-105' : 'border-slate-200 text-slate-600 hover:border-indigo-300 hover:bg-slate-50'}`}>
+              className={`p-3 rounded-xl border-2 text-sm font-bold transition-all ${selectedTargetId === t.id ? 'border-indigo-600 bg-indigo-50 text-indigo-700 scale-105' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
               {t.name}
             </button>
           ))}
           {votedTargetIds.filter(id => id !== voterIdentity).map(id => {
-            const t = session.targets.find(t => t.id === id);
-            if (!t) return null;
-            return (
-              <div key={id} className="p-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-sm font-bold text-slate-300 flex items-center justify-center gap-1">
-                <Check size={14} /> {t.name}
-              </div>
-            );
+            const t = session.targets.find(t => t.id === id); if (!t) return null;
+            return <div key={id} className="p-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-sm font-bold text-slate-300 flex items-center justify-center gap-1"><Check size={14} /> {t.name}</div>;
           })}
         </div>
       </div>
 
-      {/* 評分表單（只有選了對象才顯示） */}
       {selectedTarget && (
         <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="bg-indigo-600 p-6 text-center text-white">
@@ -895,36 +766,28 @@ function VoterInterface({ user, sessionCode }) {
                     <div className="flex flex-wrap gap-2">
                       {Array.from({ length: c.maxScore }, (_, i) => i + 1).map(val => (
                         <button key={val} onClick={() => handleScoreChange(c.id, val)}
-                          className={`flex-1 min-w-[40px] py-3 rounded-xl font-bold text-lg transition-all ${scores[c.id] === val ? 'bg-indigo-600 text-white shadow-md transform scale-105' : 'bg-white border-2 border-slate-200 text-slate-600 hover:border-indigo-300 hover:bg-indigo-50'}`}>
+                          className={`flex-1 min-w-[40px] py-3 rounded-xl font-bold text-lg transition-all ${scores[c.id] === val ? 'bg-indigo-600 text-white shadow-md scale-105' : 'bg-white border-2 border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
                           {val}
                         </button>
                       ))}
                     </div>
                   ) : (
                     <div className="flex items-center gap-4">
-                      <input type="range" min="0" max={c.maxScore} value={scores[c.id] || 0}
-                        onChange={(e) => handleScoreChange(c.id, e.target.value)}
-                        className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
-                      <input type="number" min="0" max={c.maxScore} value={scores[c.id] || ''}
-                        onChange={(e) => handleScoreChange(c.id, e.target.value)}
-                        placeholder="輸入"
-                        className="w-24 p-3 text-center font-bold text-lg border-2 border-slate-200 rounded-xl focus:border-indigo-500 outline-none" />
+                      <input type="range" min="0" max={c.maxScore} value={scores[c.id] || 0} onChange={(e) => handleScoreChange(c.id, e.target.value)} className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
+                      <input type="number" min="0" max={c.maxScore} value={scores[c.id] || ''} onChange={(e) => handleScoreChange(c.id, e.target.value)} placeholder="輸入" className="w-24 p-3 text-center font-bold text-lg border-2 border-slate-200 rounded-xl focus:border-indigo-500 outline-none" />
                     </div>
                   )}
                 </div>
               ))}
             </div>
             <div className="pt-4 border-t border-dashed border-slate-200">
-              <label className="block text-base font-bold text-slate-800 mb-2 flex items-center gap-2">
-                <MessageSquare size={18} className="text-slate-400" />
-                給他們的回饋 (選填)
-              </label>
+              <label className="block text-base font-bold text-slate-800 mb-2 flex items-center gap-2"><MessageSquare size={18} className="text-slate-400" /> 給他們的回饋 (選填)</label>
               <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)}
                 className="w-full p-4 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none bg-slate-50 focus:bg-white transition-colors"
                 rows="3" placeholder="寫下您的鼓勵或具體建議，將會匿名顯示給主辦單位..."></textarea>
             </div>
             <button onClick={submitVote} disabled={!isComplete || isSubmitting}
-              className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-indigo-200 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2">
+              className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-indigo-200 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
               {isSubmitting ? '送出中...' : '送出評分，選擇下一位'}
             </button>
           </div>

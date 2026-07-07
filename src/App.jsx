@@ -802,6 +802,7 @@ function VoterInterface({ user, sessionCode }) {
   const currentRoundIndex = session.currentRoundIndex ?? 0;
   const roundOrder = session.roundOrder ?? [];
   const currentTargetId = isRoundMode ? roundOrder[currentRoundIndex] : null;
+  const roundActiveTarget = currentTargetId ? session.targets.find(t => t.id === currentTargetId) : null;
   const unlockedForSupp = session.unlockedForSupp ?? [];
 
   // 可評分的對象

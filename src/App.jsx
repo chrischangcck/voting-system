@@ -378,7 +378,7 @@ function AdminDashboard({ user, sessionCode, setView }) {
   const currentRoundIndex = session.currentRoundIndex ?? 0;
   const roundOrder = session.roundOrder ?? [];
   const currentTargetId = roundOrder[currentRoundIndex];
-  const currentTarget = session.targets.find(t => t.id === currentTargetId);
+  const activeTarget = session.targets.find(t => t.id === currentTargetId);
   const isLastRound = currentRoundIndex >= roundOrder.length - 1;
   const unlockedForSupp = session.unlockedForSupp ?? [];
 
@@ -496,7 +496,7 @@ function AdminDashboard({ user, sessionCode, setView }) {
               <div className="flex items-center gap-3">
                 <span className="text-2xl font-black text-indigo-700">R{currentRoundIndex + 1}</span>
                 <ChevronRight size={18} className="text-indigo-300" />
-                <span className="text-xl font-bold text-indigo-900">{currentTarget?.name ?? '—'}</span>
+                <span className="text-xl font-bold text-indigo-900">{activeTarget?.name ?? '—'}</span>
                 <span className="text-sm text-indigo-500 ml-2">{roundCompletedCount} / {roundTotal} 人已評</span>
               </div>
             </div>
@@ -960,7 +960,7 @@ function VoterInterface({ user, sessionCode }) {
           <SkipForward size={18} className="text-indigo-400 shrink-0" />
           <div>
             <span className="text-sm font-bold text-indigo-700">Round {currentRoundIndex + 1}　</span>
-            <span className="text-sm text-indigo-600">目前開放評分：{currentTarget?.name}</span>
+            <span className="text-sm text-indigo-600">目前開放評分：{activeTarget?.name}</span>
             {unlockedForSupp.length > 0 && <span className="text-xs text-amber-600 ml-2">（另有補評開放）</span>}
           </div>
         </div>

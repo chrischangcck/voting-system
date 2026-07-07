@@ -24,6 +24,24 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// ─── 錯誤邊界 ───────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 32, fontFamily: 'monospace', color: 'red' }}>
+          <h2>系統錯誤</h2>
+          <pre>{this.state.error.message}</pre>
+          <pre>{this.state.error.stack}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ─── 主 App ────────────────────────────────────────────────
 export default function App() {
   const [view, setView] = useState('voter');
@@ -67,11 +85,13 @@ export default function App() {
         </div>
       </header>
       <main className="max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
-        {view === 'voter'     && <VoterEntry setView={setView} setSessionCode={setSessionCode} />}
-        {view === 'host'      && <AdminSetup user={user} setView={setView} setSessionCode={setSessionCode} />}
-        {view === 'dashboard' && <AdminDashboard user={user} sessionCode={sessionCode} setView={setView} />}
-        {view === 'voting'    && <VoterInterface user={user} sessionCode={sessionCode} />}
-        {view === 'history'   && <HistoryList setView={setView} setSessionCode={setSessionCode} />}
+        <ErrorBoundary>
+          {view === 'voter'     && <VoterEntry setView={setView} setSessionCode={setSessionCode} />}
+          {view === 'host'      && <AdminSetup user={user} setView={setView} setSessionCode={setSessionCode} />}
+          {view === 'dashboard' && <AdminDashboard user={user} sessionCode={sessionCode} setView={setView} />}
+          {view === 'voting'    && <VoterInterface user={user} sessionCode={sessionCode} />}
+          {view === 'history'   && <HistoryList setView={setView} setSessionCode={setSessionCode} />}
+        </ErrorBoundary>
       </main>
     </div>
   );
@@ -378,7 +398,7 @@ function AdminDashboard({ user, sessionCode, setView }) {
   const currentRoundIndex = session.currentRoundIndex ?? 0;
   const roundOrder = session.roundOrder ?? [];
   const currentTargetId = roundOrder[currentRoundIndex];
-  const activeTarget = session.targets.find(t => t.id === currentTargetId);
+  const openTarget = session.targets.find(t => t.id === currentTargetId);
   const isLastRound = currentRoundIndex >= roundOrder.length - 1;
   const unlockedForSupp = session.unlockedForSupp ?? [];
 
@@ -496,7 +516,7 @@ function AdminDashboard({ user, sessionCode, setView }) {
               <div className="flex items-center gap-3">
                 <span className="text-2xl font-black text-indigo-700">R{currentRoundIndex + 1}</span>
                 <ChevronRight size={18} className="text-indigo-300" />
-                <span className="text-xl font-bold text-indigo-900">{activeTarget?.name ?? '—'}</span>
+                <span className="text-xl font-bold text-indigo-900">{openTarget?.name ?? '—'}</span>
                 <span className="text-sm text-indigo-500 ml-2">{roundCompletedCount} / {roundTotal} 人已評</span>
               </div>
             </div>
@@ -960,7 +980,7 @@ function VoterInterface({ user, sessionCode }) {
           <SkipForward size={18} className="text-indigo-400 shrink-0" />
           <div>
             <span className="text-sm font-bold text-indigo-700">Round {currentRoundIndex + 1}　</span>
-            <span className="text-sm text-indigo-600">目前開放評分：{activeTarget?.name}</span>
+            <span className="text-sm text-indigo-600">目前開放評分：{openTarget?.name}</span>
             {unlockedForSupp.length > 0 && <span className="text-xs text-amber-600 ml-2">（另有補評開放）</span>}
           </div>
         </div>
